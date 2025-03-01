@@ -21,6 +21,8 @@
   "homepage": "https://github.com/soletty/hyperramp-backend#readme",
   "description": "",
   "dependencies": {
+    "@types/axios": "^0.9.36",
+    "axios": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "ethers": "^5.7.2",

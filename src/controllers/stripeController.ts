@@ -1,13 +1,19 @@
 import { Request, Response } from 'express';
 import Stripe from 'stripe';
 import config from '../config/config';
+import { 
+  getWalletBalance, 
+  processDeposit, 
+  getTransactionStatus,
+  getAllTransactionStatuses
+} from '../services/onrampService';
 
 // Initialize Stripe with the secret key
 const stripe = new Stripe(config.stripeSecretKey);
 
 // Maximum amount allowed for onramp (in USD cents)
 const MAX_AMOUNT_USD_CENTS = 250000; // $2,500.00
-const MIN_AMOUNT_USD_CENTS = 1000;   // $10.00
+const MIN_AMOUNT_USD_CENTS = 500;   // $5.00
 
 /**
  * Create a Stripe checkout session
@@ -34,6 +40,22 @@ export const createCheckoutSession = async (req: Request, res: Response) => {
     
     if (baseAmountCents < MIN_AMOUNT_USD_CENTS) {
       return res.status(400).json({ message: `Amount must be at least $${MIN_AMOUNT_USD_CENTS / 100}` });
+    }
+    
+    // Check if we have enough balance for this onramp
+    try {
+      const { availableForOnramp } = await getWalletBalance();
+      
+      if (availableForOnramp < amount) {
+        return res.status(400).json({
+          message: `Insufficient balance for onramp. Maximum available: $${availableForOnramp.toFixed(2)}`,
+          availableForOnramp
+        });
+      }
+    } catch (error) {
+      console.error('Error checking wallet balance:', error);
+      // Continue with the checkout creation even if balance check fails
+      // We'll check again when processing the payment
     }
     
     // Calculate our service fee (0.5%) - ADDED ON TOP of the base amount
@@ -169,6 +191,9 @@ export const verifySession = async (req: Request, res: Response) => {
     const totalPaid = parseFloat(session.metadata?.totalAmountCents || '0') / 100;
     const walletAddress = session.metadata?.walletAddress || '';
     
+    // Check if we have a transaction status for this session
+    const txStatus = getTransactionStatus(id);
+    
     // Return session details
     return res.status(200).json({
       success: true,
@@ -183,6 +208,14 @@ export const verifySession = async (req: Request, res: Response) => {
         customer: session.customer,
         customerDetails: session.customer_details,
       },
+      transaction: txStatus || {
+        status: 'pending',
+        sessionId: id,
+        walletAddress,
+        amount: baseAmount,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
     });
   } catch (error) {
     console.error('Error verifying session:', error);
@@ -243,9 +276,46 @@ export const handleWebhook = async (req: Request, res: Response) => {
           console.log(`💵 Amount: ${baseAmount} USDC`);
           
           try {
-            // Process the USDC deposit to Hyperliquid
-            await processUsdcDeposit(walletAddress, baseAmount);
-            console.log(`🚀 Successfully processed USDC deposit of ${baseAmount} to ${walletAddress}`);
+            // Process the USDC deposit to Hyperliquid using our onramp service
+            console.log('🔄 About to process deposit...');
+            const result = await processDeposit(session.id, walletAddress, baseAmount);
+            console.log('📊 Process deposit result:', JSON.stringify(result, null, 2));
+            
+            if (result.success) {
+              console.log(`🚀 Successfully processed USDC deposit of ${baseAmount} to ${walletAddress}`);
+              console.log(`🧾 Transaction hash: ${result.txHash}`);
+              
+              // We no longer delete the transaction immediately
+              // It will be cleaned up by the scheduled job after 24 hours
+            } else {
+              console.error(`❌ Failed to process deposit: ${result.error}`);
+              console.log('💸 Attempting to issue refund...');
+              
+              // Issue a refund to the customer
+              try {
+                if (session.payment_intent) {
+                  const paymentIntentId = typeof session.payment_intent === 'string' 
+                    ? session.payment_intent 
+                    : session.payment_intent.id;
+                  
+                  console.log(`💸 Issuing refund for payment intent: ${paymentIntentId}`);
+                  
+                  const refund = await stripe.refunds.create({
+                    payment_intent: paymentIntentId,
+                    reason: 'requested_by_customer',
+                  });
+                  
+                  console.log(`✅ Refund issued: ${refund.id}`);
+                  
+                  // We no longer delete the transaction immediately
+                  // It will be cleaned up by the scheduled job after 24 hours
+                } else {
+                  console.error('❌ Cannot issue refund: No payment intent found in session');
+                }
+              } catch (refundError) {
+                console.error('❌ Error issuing refund:', refundError);
+              }
+            }
           } catch (error) {
             console.error('❌ Error processing USDC deposit:', error);
             // Note: We're still returning a 200 to Stripe to acknowledge receipt
@@ -270,45 +340,79 @@ export const handleWebhook = async (req: Request, res: Response) => {
 };
 
 /**
- * Process a USDC deposit to Hyperliquid
- * This is where you would implement the actual deposit logic
+ * Get the current wallet balance and available amount for onramp
  */
-async function processUsdcDeposit(destinationAddress: string, amount: number): Promise<void> {
-  // TODO: Implement the actual deposit logic using ethers.js or similar
-  // This is a placeholder function that would be replaced with actual implementation
-  
-  console.log(`\n========== PROCESSING DEPOSIT ==========`);
-  console.log(`📤 Processing deposit of ${amount} USDC to ${destinationAddress}`);
-  
-  // 1. Connect to Arbitrum network
-  // 2. Load your wallet using private key from env
-  // 3. Send USDC to the bridge contract
-  
-  // Example implementation would look something like this:
-  /*
-  const provider = new ethers.providers.JsonRpcProvider(process.env.ARBITRUM_RPC_URL);
-  const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
-  
-  // USDC contract on Arbitrum
-  const usdcContract = new ethers.Contract(
-    process.env.USDC_CONTRACT_ADDRESS,
-    ['function transfer(address to, uint256 amount) returns (bool)'],
-    wallet
-  );
-  
-  // Bridge contract address
-  const bridgeAddress = '0x2df1c51e09aecf9cacb7bc98cb1742757f163df7'; // Mainnet
-  
-  // Convert amount to proper decimal representation (USDC has 6 decimals)
-  const amountInWei = ethers.utils.parseUnits(amount.toString(), 6);
-  
-  // Send USDC to the bridge with the user's address in the data field
-  const tx = await usdcContract.transfer(bridgeAddress, amountInWei);
-  await tx.wait();
-  */
-  
-  // For now, we'll just log that we would process the deposit
-  console.log('💼 Deposit would be processed here');
-  console.log(`✅ Deposit of ${amount} USDC to ${destinationAddress} would be complete`);
-  console.log(`========================================\n`);
-} 
+export const getOnrampCapacity = async (req: Request, res: Response) => {
+  try {
+    const balanceInfo = await getWalletBalance();
+    
+    return res.status(200).json({
+      success: true,
+      ...balanceInfo,
+      maxAmount: Math.min(balanceInfo.availableForOnramp, MAX_AMOUNT_USD_CENTS / 100),
+      minAmount: MIN_AMOUNT_USD_CENTS / 100
+    });
+  } catch (error) {
+    console.error('Error getting onramp capacity:', error);
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'Failed to get onramp capacity',
+    });
+  }
+};
+
+/**
+ * Get transaction status by session ID
+ */
+export const getTransactionStatusById = async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    
+    if (!sessionId) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Session ID is required' 
+      });
+    }
+    
+    const txStatus = getTransactionStatus(sessionId);
+    
+    if (!txStatus) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Transaction not found' 
+      });
+    }
+    
+    return res.status(200).json({
+      success: true,
+      transaction: txStatus
+    });
+  } catch (error) {
+    console.error('Error getting transaction status:', error);
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'Failed to get transaction status',
+    });
+  }
+};
+
+/**
+ * Get all transaction statuses
+ */
+export const getAllTransactions = async (req: Request, res: Response) => {
+  try {
+    const transactions = getAllTransactionStatuses();
+    
+    return res.status(200).json({
+      success: true,
+      transactions
+    });
+  } catch (error) {
+    console.error('Error getting all transactions:', error);
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'Failed to get all transactions',
+    });
+  }
+}; 
