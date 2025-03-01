@@ -14,10 +14,14 @@ const MIN_AMOUNT_USD_CENTS = 1000;   // $10.00
  */
 export const createCheckoutSession = async (req: Request, res: Response) => {
   try {
-    const { amount } = req.body;
+    const { amount, walletAddress } = req.body;
     
     if (!amount || typeof amount !== 'number') {
       return res.status(400).json({ message: 'Valid amount is required' });
+    }
+    
+    if (!walletAddress || typeof walletAddress !== 'string') {
+      return res.status(400).json({ message: 'Valid wallet address is required' });
     }
     
     // Convert to cents for precision
@@ -107,6 +111,7 @@ export const createCheckoutSession = async (req: Request, res: Response) => {
         serviceFeeCents: serviceFeeCents.toString(),
         stripeFeeCents: stripeFeeCents.toString(),
         totalAmountCents: totalAmountCents.toString(),
+        walletAddress: walletAddress,
         note: 'User pays USDC amount + service fee + Stripe processing fee',
       },
     });
@@ -162,6 +167,7 @@ export const verifySession = async (req: Request, res: Response) => {
     const serviceFee = parseFloat(session.metadata?.serviceFeeCents || '0') / 100;
     const stripeFee = parseFloat(session.metadata?.stripeFeeCents || '0') / 100;
     const totalPaid = parseFloat(session.metadata?.totalAmountCents || '0') / 100;
+    const walletAddress = session.metadata?.walletAddress || '';
     
     // Return session details
     return res.status(200).json({
@@ -172,6 +178,7 @@ export const verifySession = async (req: Request, res: Response) => {
         serviceFee: serviceFee,
         stripeFee: stripeFee,
         totalPaid: totalPaid,
+        walletAddress: walletAddress,
         paymentStatus: session.payment_status,
         customer: session.customer,
         customerDetails: session.customer_details,
@@ -183,4 +190,125 @@ export const verifySession = async (req: Request, res: Response) => {
       message: error instanceof Error ? error.message : 'Failed to verify session',
     });
   }
-}; 
+};
+
+/**
+ * Handle Stripe webhook events
+ */
+export const handleWebhook = async (req: Request, res: Response) => {
+  console.log('🔔 Webhook received!');
+  
+  const sig = req.headers['stripe-signature'] as string;
+  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET || config.stripeWebhookSecret;
+  
+  if (!endpointSecret) {
+    console.error('❌ Webhook secret not configured');
+    return res.status(500).json({ message: 'Webhook secret not configured' });
+  }
+  
+  let event: Stripe.Event;
+  
+  try {
+    // Verify the event came from Stripe
+    event = stripe.webhooks.constructEvent(
+      req.body,
+      sig,
+      endpointSecret
+    );
+    console.log(`✅ Webhook verified! Event type: ${event.type}`);
+  } catch (err) {
+    console.error('❌ Webhook signature verification failed:', err);
+    return res.status(400).json({ message: 'Webhook signature verification failed' });
+  }
+  
+  // Handle the event
+  switch (event.type) {
+    case 'checkout.session.completed':
+      const session = event.data.object as Stripe.Checkout.Session;
+      console.log(`💰 Checkout session completed: ${session.id}`);
+      console.log(`Payment status: ${session.payment_status}`);
+      
+      // Make sure the payment was successful
+      if (session.payment_status === 'paid') {
+        console.log('✅ Payment was successful!');
+        
+        // Get the wallet address and amount from the session metadata
+        const walletAddress = session.metadata?.walletAddress;
+        const baseAmount = parseFloat(session.metadata?.baseAmount || '0');
+        
+        console.log('📝 Session metadata:', session.metadata);
+        
+        if (walletAddress && baseAmount) {
+          console.log(`🔑 Wallet Address: ${walletAddress}`);
+          console.log(`💵 Amount: ${baseAmount} USDC`);
+          
+          try {
+            // Process the USDC deposit to Hyperliquid
+            await processUsdcDeposit(walletAddress, baseAmount);
+            console.log(`🚀 Successfully processed USDC deposit of ${baseAmount} to ${walletAddress}`);
+          } catch (error) {
+            console.error('❌ Error processing USDC deposit:', error);
+            // Note: We're still returning a 200 to Stripe to acknowledge receipt
+            // You should implement proper error handling and retry logic
+          }
+        } else {
+          console.error('❌ Missing wallet address or amount in session metadata');
+          console.error('Metadata received:', session.metadata);
+        }
+      } else {
+        console.log(`⚠️ Payment status is not 'paid': ${session.payment_status}`);
+      }
+      break;
+      
+    default:
+      console.log(`ℹ️ Unhandled event type: ${event.type}`);
+  }
+  
+  // Return a 200 response to acknowledge receipt of the event
+  console.log('✅ Webhook processed successfully');
+  res.status(200).json({ received: true });
+};
+
+/**
+ * Process a USDC deposit to Hyperliquid
+ * This is where you would implement the actual deposit logic
+ */
+async function processUsdcDeposit(destinationAddress: string, amount: number): Promise<void> {
+  // TODO: Implement the actual deposit logic using ethers.js or similar
+  // This is a placeholder function that would be replaced with actual implementation
+  
+  console.log(`\n========== PROCESSING DEPOSIT ==========`);
+  console.log(`📤 Processing deposit of ${amount} USDC to ${destinationAddress}`);
+  
+  // 1. Connect to Arbitrum network
+  // 2. Load your wallet using private key from env
+  // 3. Send USDC to the bridge contract
+  
+  // Example implementation would look something like this:
+  /*
+  const provider = new ethers.providers.JsonRpcProvider(process.env.ARBITRUM_RPC_URL);
+  const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
+  
+  // USDC contract on Arbitrum
+  const usdcContract = new ethers.Contract(
+    process.env.USDC_CONTRACT_ADDRESS,
+    ['function transfer(address to, uint256 amount) returns (bool)'],
+    wallet
+  );
+  
+  // Bridge contract address
+  const bridgeAddress = '0x2df1c51e09aecf9cacb7bc98cb1742757f163df7'; // Mainnet
+  
+  // Convert amount to proper decimal representation (USDC has 6 decimals)
+  const amountInWei = ethers.utils.parseUnits(amount.toString(), 6);
+  
+  // Send USDC to the bridge with the user's address in the data field
+  const tx = await usdcContract.transfer(bridgeAddress, amountInWei);
+  await tx.wait();
+  */
+  
+  // For now, we'll just log that we would process the deposit
+  console.log('💼 Deposit would be processed here');
+  console.log(`✅ Deposit of ${amount} USDC to ${destinationAddress} would be complete`);
+  console.log(`========================================\n`);
+} 
