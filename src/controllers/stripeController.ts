@@ -22,12 +22,17 @@ export const createCheckoutSession = async (req: Request, res: Response) => {
   try {
     const { amount, walletAddress } = req.body;
     
-    if (!amount || typeof amount !== 'number') {
-      return res.status(400).json({ message: 'Valid amount is required' });
+    if (!amount || typeof amount !== 'number' || amount <= 0) {
+      return res.status(400).json({ message: 'Valid amount is required (must be a positive number)' });
     }
     
     if (!walletAddress || typeof walletAddress !== 'string') {
       return res.status(400).json({ message: 'Valid wallet address is required' });
+    }
+    
+    // Validate wallet address format (must be a valid Ethereum address)
+    if (!walletAddress.match(/^0x[a-fA-F0-9]{40}$/)) {
+      return res.status(400).json({ message: 'Invalid wallet address format' });
     }
     
     // Convert to cents for precision
@@ -163,8 +168,13 @@ export const verifySession = async (req: Request, res: Response) => {
   try {
     const { id } = req.query;
     
-    if (!id || typeof id !== 'string') {
+    if (!id || typeof id !== 'string' || id.trim() === '') {
       return res.status(400).json({ message: 'Valid session ID is required' });
+    }
+    
+    // Validate session ID format (basic check for potential injection)
+    if (id.length > 100 || /[<>]/.test(id)) {
+      return res.status(400).json({ message: 'Invalid session ID format' });
     }
     
     // Retrieve the session from Stripe
@@ -368,10 +378,18 @@ export const getTransactionStatusById = async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.params;
     
-    if (!sessionId) {
+    if (!sessionId || typeof sessionId !== 'string' || sessionId.trim() === '') {
       return res.status(400).json({ 
         success: false,
-        message: 'Session ID is required' 
+        message: 'Valid session ID is required' 
+      });
+    }
+    
+    // Validate session ID format (basic check for potential injection)
+    if (sessionId.length > 100 || /[<>]/.test(sessionId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid session ID format'
       });
     }
     

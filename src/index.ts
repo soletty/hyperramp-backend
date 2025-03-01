@@ -7,7 +7,11 @@ import stripeRoutes from './routes/stripeRoutes';
 const app = express();
 
 // Middleware
-app.use(cors());
+// Basic CORS configuration - allows any origin but restricts methods
+app.use(cors({
+  origin: '*', // Allow any origin for now
+  methods: ['GET', 'POST'], // Only allow necessary methods
+}));
 
 // Special handling for Stripe webhooks - needs raw body
 app.use('/api/webhook', express.raw({ type: 'application/json' }));
