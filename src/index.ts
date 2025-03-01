@@ -7,10 +7,12 @@ import stripeRoutes from './routes/stripeRoutes';
 const app = express();
 
 // Middleware
-// Basic CORS configuration - allows any origin but restricts methods
+// Updated CORS configuration to allow specific origins
 app.use(cors({
-  origin: '*', // Allow any origin for now
-  methods: ['GET', 'POST'], // Only allow necessary methods
+  origin: ['https://hyperramp.xyz', 'http://localhost:3000', 'http://localhost:5173'], // Allow your frontend domain and local development
+  methods: ['GET', 'POST', 'OPTIONS'], // Include OPTIONS for preflight requests
+  credentials: true, // Allow credentials
+  allowedHeaders: ['Content-Type', 'Authorization', 'stripe-signature']
 }));
 
 // Special handling for Stripe webhooks - needs raw body
