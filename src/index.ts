@@ -1,6 +1,7 @@
 import express from 'express';
 import config from './config/config';
 import stripeRoutes from './routes/stripeRoutes';
+import onrampRoutes from './routes/onrampRoutes';
 import { corsMiddleware } from './middleware/cors';
 
 // Initialize Express
@@ -17,6 +18,7 @@ app.use(express.json());
 
 // Routes
 app.use('/api', stripeRoutes);
+app.use('/api/onramp', onrampRoutes);
 
 // Health check route
 app.get('/health', (req, res) => {

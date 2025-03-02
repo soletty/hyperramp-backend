@@ -326,6 +326,15 @@ exports.handleWebhook = handleWebhook;
  * Get the current wallet balance and available amount for onramp
  */
 const getOnrampCapacity = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    // Explicitly set CORS headers for this endpoint
+    res.setHeader('Access-Control-Allow-Origin', 'https://hyperramp.xyz');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Authorization, stripe-signature');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
     try {
         const balanceInfo = yield (0, onrampService_1.getWalletBalance)();
         return res.status(200).json(Object.assign(Object.assign({ success: true }, balanceInfo), { maxAmount: Math.min(balanceInfo.availableForOnramp, MAX_AMOUNT_USD_CENTS / 100), minAmount: MIN_AMOUNT_USD_CENTS / 100 }));
