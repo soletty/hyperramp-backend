@@ -5,7 +5,8 @@ import {
   getWalletBalance, 
   processDeposit, 
   getTransactionStatus,
-  getAllTransactionStatuses
+  getAllTransactionStatuses,
+  getTotalOnrampedAmount
 } from '../services/onrampService';
 
 // Initialize Stripe with the secret key
@@ -442,6 +443,27 @@ export const getAllTransactions = async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       message: error instanceof Error ? error.message : 'Failed to get all transactions',
+    });
+  }
+};
+
+/**
+ * Get the total amount onramped
+ */
+export const getTotalOnramped = async (req: Request, res: Response) => {
+  try {
+    const totalAmount = getTotalOnrampedAmount();
+    
+    return res.status(200).json({
+      success: true,
+      totalOnramped: totalAmount,
+      formattedTotal: `${totalAmount.toFixed(2)} USDC`
+    });
+  } catch (error) {
+    console.error('Error getting total onramped amount:', error);
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'Failed to get total onramped amount',
     });
   }
 }; 

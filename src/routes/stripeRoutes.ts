@@ -5,7 +5,8 @@ import {
   handleWebhook, 
   getOnrampCapacity,
   getTransactionStatusById,
-  getAllTransactions
+  getAllTransactions,
+  getTotalOnramped
 } from '../controllers/stripeController';
 
 const router = Router();
@@ -24,6 +25,9 @@ router.get('/transaction/:sessionId', getTransactionStatusById as express.Reques
 
 // Get all transactions
 router.get('/transactions', getAllTransactions as express.RequestHandler);
+
+// Get total onramped amount
+router.get('/total-onramped', getTotalOnramped as express.RequestHandler);
 
 // Stripe webhook route - needs raw body for signature verification
 router.post('/webhook', 

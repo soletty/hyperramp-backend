@@ -31,6 +31,9 @@ export interface TransactionStatus {
 // In a production environment, this would be a database
 const pendingTransactions: Map<string, PendingTransaction> = new Map();
 
+// Track total amount onramped (initialized at 39 USDC as requested)
+let totalOnrampedAmount = 39;
+
 // Cache for the last fetched wallet balance
 let lastBalanceCheck = {
   timestamp: 0,
@@ -263,6 +266,9 @@ export async function processDeposit(
           txHash
         });
         
+        // Increment the total onramped amount
+        incrementTotalOnrampedAmount(amount);
+        
         return {
           success: true,
           txHash,
@@ -321,6 +327,9 @@ export async function processDeposit(
         txHash
       });
       
+      // Increment the total onramped amount
+      incrementTotalOnrampedAmount(amount);
+      
       return {
         success: true,
         txHash,
@@ -373,4 +382,21 @@ export function cleanupOldTransactions(maxAgeHours = 24): void {
       pendingTransactions.delete(id);
     }
   }
+}
+
+/**
+ * Increment the total onramped amount
+ * @param amount The amount to add to the total
+ */
+export function incrementTotalOnrampedAmount(amount: number): void {
+  totalOnrampedAmount += amount;
+  console.log(`💰 Total onramped amount increased by ${amount} USDC to ${totalOnrampedAmount} USDC`);
+}
+
+/**
+ * Get the total onramped amount
+ * @returns The total amount onramped in USDC
+ */
+export function getTotalOnrampedAmount(): number {
+  return totalOnrampedAmount;
 } 
