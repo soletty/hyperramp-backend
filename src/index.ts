@@ -1,13 +1,13 @@
 import express from 'express';
-import cors from 'cors';
 import config from './config/config';
 import stripeRoutes from './routes/stripeRoutes';
+import { corsMiddleware } from './middleware/cors';
 
 // Initialize Express
 const app = express();
 
-// Simple CORS middleware
-app.use(cors());
+// Apply custom CORS middleware before any other middleware
+app.use(corsMiddleware);
 
 // Special handling for Stripe webhooks - needs raw body
 app.use('/api/webhook', express.raw({ type: 'application/json' }));
